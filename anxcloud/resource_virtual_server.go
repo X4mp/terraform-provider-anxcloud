@@ -3,6 +3,7 @@ package anxcloud
 import (
 	"context"
 	"fmt"
+	"github.com/anexia-it/go-anxcloud/pkg/vsphere/info"
 	"log"
 	"time"
 
@@ -147,6 +148,8 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		return diags
 	}
 
+	var disks []vm.Disk  // TODO implement expandVirtualServerDisks function
+
 	def := vm.Definition{
 		Location:           locationID,
 		TemplateType:       d.Get("template_type").(string),
@@ -154,7 +157,7 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		Hostname:           d.Get("hostname").(string),
 		Memory:             d.Get("memory").(int),
 		CPUs:               d.Get("cpus").(int),
-		Disk:               d.Get("disk").(int),
+		Disk:               d.Get("disk").(int), // TODO change to disks[0]
 		DiskType:           d.Get("disk_type").(string),
 		CPUPerformanceType: d.Get("cpu_performance_type").(string),
 		Sockets:            d.Get("sockets").(int),
@@ -172,6 +175,7 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 
 	base64Encoding := true
 	provision, err := v.Provisioning().VM().Provision(ctx, def, base64Encoding)
+	var vmInfo info.Info
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -188,20 +192,43 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 			}
 		}
 
-		info, err := v.Info().Get(ctx, d.Id())
+		vmInfo, err := v.Info().Get(ctx, d.Id())
 		if err != nil {
 			return resource.NonRetryableError(fmt.Errorf("unable to get vm  by ID '%s', %w", d.Id(), err))
 		}
-		if info.Status == vmPoweredOn {
+		if vmInfo.Status == vmPoweredOn {
 			return nil
 		}
-		return resource.RetryableError(fmt.Errorf("vm with id '%s' is not %s yet: %s", d.Id(), vmPoweredOn, info.Status))
+		return resource.RetryableError(fmt.Errorf("vm with id '%s' is not %s yet: %s", d.Id(), vmPoweredOn, vmInfo.Status))
 	})
 
 	if err != nil {
 		return diag.FromErr(err)
 	}
 
+	// TODO check if disks differ
+	// TODO assume the slice is sorted by disk ID
+	// TODO move the following loop to a speparat function
+	changeDisks := make([]vm.Disk, 0, len(disks))
+	if disks != nil && len(disks) >= vmInfo.Disks {
+		for diskIndex := range vmInfo.DiskInfo {
+			disks[diskIndex].ID = vmInfo.DiskInfo[diskIndex].DiskID
+			actualDisk := vmInfo.DiskInfo[diskIndex]
+			expectedDisk := disks[diskIndex]
+
+			// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
+			if actualDisk.DiskType != expectedDisk.Type || actualDisk.DiskGB != expectedDisk.SizeGBs {
+				changeDisks = append(changeDisks, expectedDisk)
+			}
+		}
+
+		addDisks := make([]vm.Disk, 0, len(disks))
+		if len(disks) > vmInfo.Disks {
+			for newDiskIndex := vmInfo.Disks; newDiskIndex < len(disks); newDiskIndex++ {
+				// ... TODO add new disks
+			}
+		}
+	}
 	tags := expandTags(d.Get("tags").([]interface{}))
 	for _, t := range tags {
 		if err := attachTag(ctx, c, d.Id(), t); err != nil {
@@ -259,17 +286,32 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 		diags = append(diags, diag.FromErr(err)...)
 	}
 
-	if len(info.DiskInfo) != 1 {
-		return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
+	//if len(info.DiskInfo) != 1 {
+	//	return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
+	//}
+	var specDisks []vm.Disk  // TODO implement expand func (see expandVirtualServerNetworks)
+	if len(specDisks) != info.Disks {
+		return diag.Errorf("unsupported number of disks, expected %d, got %d", len(specDisks), info.Disks)
 	}
-	if err = d.Set("disk", info.DiskInfo[0].DiskGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if v := d.Get("disk_type").(string); v != "" {
-		if err = d.Set("disk_type", info.DiskInfo[0].DiskType); err != nil {
-			diags = append(diags, diag.FromErr(err)...)
+	var disks []vm.Disk
+	for _, diskInfo := range info.DiskInfo {
+		disk := vm.Disk{
+			ID:      diskInfo.DiskID,
+			Type:    diskInfo.DiskType,
+			SizeGBs: diskInfo.DiskGB,
 		}
+		disks = append(disks, disk)
 	}
+
+	// TODO implement flatten func to set the disks back to the state
+	//if err = d.Set("disk", info.DiskInfo[0].DiskGB); err != nil {
+	//	diags = append(diags, diag.FromErr(err)...)
+	//}
+	//if v := d.Get("disk_type").(string); v != "" {
+	//	if err = d.Set("disk_type", info.DiskInfo[0].DiskType); err != nil {
+	//		diags = append(diags, diag.FromErr(err)...)
+	//	}
+	//}
 
 	specNetworks := expandVirtualServerNetworks(d.Get("network").([]interface{}))
 	var networks []vm.Network
