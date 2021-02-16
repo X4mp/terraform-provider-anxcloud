@@ -102,6 +102,7 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 	var (
 		diags    diag.Diagnostics
 		networks []vm.Network
+		disks    []vm.Disk
 	)
 
 	c := m.(client.Client)
@@ -144,11 +145,20 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		})
 	}
 
+	disks = expandVirtualServerDisks(d.Get("disks").([]interface{}))
+	if len(disks) < 1 {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Error,
+			Summary: "No disk specified",
+			Detail: "Minimum of one disk has to be specified",
+			AttributePath: cty.Path{cty.GetAttrStep{Name: "size_gb"}},
+		})
+	}
+
 	if len(diags) > 0 {
 		return diags
 	}
 
-	var disks []vm.Disk  // TODO implement expandVirtualServerDisks function
 
 	def := vm.Definition{
 		Location:           locationID,
@@ -157,8 +167,8 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		Hostname:           d.Get("hostname").(string),
 		Memory:             d.Get("memory").(int),
 		CPUs:               d.Get("cpus").(int),
-		Disk:               d.Get("disk").(int), // TODO change to disks[0]
-		DiskType:           d.Get("disk_type").(string),
+		Disk:               disks[0].SizeGBs, //d.Get("disk").(int),
+		DiskType:           disks[0].Type,    //d.Get("disk_type").(string),
 		CPUPerformanceType: d.Get("cpu_performance_type").(string),
 		Sockets:            d.Get("sockets").(int),
 		Network:            networks,
@@ -206,10 +216,14 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		return diag.FromErr(err)
 	}
 
-	// TODO check if disks differ
-	// TODO assume the slice is sorted by disk ID
+	if disks != nil && len(disks) < vmInfo.Disks {
+		return diag.Diagnostic{}
+	}
+
 	// TODO move the following loop to a speparat function
+	// DELETE IS NOT SUPPORTED AT CREATION
 	changeDisks := make([]vm.Disk, 0, len(disks))
+	addDisks := make([]vm.Disk, 0, len(disks))
 	if disks != nil && len(disks) >= vmInfo.Disks {
 		for diskIndex := range vmInfo.DiskInfo {
 			disks[diskIndex].ID = vmInfo.DiskInfo[diskIndex].DiskID
@@ -222,13 +236,13 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 			}
 		}
 
-		addDisks := make([]vm.Disk, 0, len(disks))
 		if len(disks) > vmInfo.Disks {
 			for newDiskIndex := vmInfo.Disks; newDiskIndex < len(disks); newDiskIndex++ {
-				// ... TODO add new disks
+				addDisks = append(addDisks, disks[newDiskIndex])
 			}
 		}
 	}
+
 	tags := expandTags(d.Get("tags").([]interface{}))
 	for _, t := range tags {
 		if err := attachTag(ctx, c, d.Id(), t); err != nil {
@@ -289,7 +303,7 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 	//if len(info.DiskInfo) != 1 {
 	//	return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
 	//}
-	var specDisks []vm.Disk  // TODO implement expand func (see expandVirtualServerNetworks)
+	var specDisks []vm.Disk // TODO implement expand func (see expandVirtualServerNetworks)
 	if len(specDisks) != info.Disks {
 		return diag.Errorf("unsupported number of disks, expected %d, got %d", len(specDisks), info.Disks)
 	}
