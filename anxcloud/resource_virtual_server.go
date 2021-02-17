@@ -216,16 +216,15 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		return diag.FromErr(err)
 	}
 
-	if disks != nil && len(disks) < vmInfo.Disks {
-		return diag.Diagnostic{}
-	}
-
 	// TODO move the following loop to a speparat function
-	// DELETE IS NOT SUPPORTED AT CREATION
+	// DELETE IS NOT SUPPORTED AT CREATION => We update what we get, or add new ones
 	changeDisks := make([]vm.Disk, 0, len(disks))
 	addDisks := make([]vm.Disk, 0, len(disks))
-	if disks != nil && len(disks) >= vmInfo.Disks {
+	if disks != nil && len(disks) > 1 {
 		for diskIndex := range vmInfo.DiskInfo {
+			if diskIndex >= len(disks) {
+				break
+			}
 			disks[diskIndex].ID = vmInfo.DiskInfo[diskIndex].DiskID
 			actualDisk := vmInfo.DiskInfo[diskIndex]
 			expectedDisk := disks[diskIndex]
@@ -241,6 +240,7 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 				addDisks = append(addDisks, disks[newDiskIndex])
 			}
 		}
+		return resourceVirtualServerUpdate(ctx, d, m)
 	}
 
 	tags := expandTags(d.Get("tags").([]interface{}))
@@ -303,7 +303,7 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 	//if len(info.DiskInfo) != 1 {
 	//	return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
 	//}
-	var specDisks []vm.Disk // TODO implement expand func (see expandVirtualServerNetworks)
+	specDisks := expandVirtualServerDisks(d.Get("disks").([]interface{}))
 	if len(specDisks) != info.Disks {
 		return diag.Errorf("unsupported number of disks, expected %d, got %d", len(specDisks), info.Disks)
 	}
@@ -418,6 +418,39 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 		ch.ChangeDisks = append(ch.ChangeDisks, disk)
 
 		requiresReboot = true
+	}
+
+	if d.HasChange("disks") {
+		var disks []vm.Disk
+
+		old, new := d.GetChange("disks")
+		oldDisks := expandVirtualServerDisks(old.([]interface{}))
+		newDisks := expandVirtualServerDisks(new.([]interface{}))
+
+		changeDisks := make([]vm.Disk, 0, len(disks))
+		addDisks := make([]vm.Disk, 0, len(disks))
+		if len(newDisks) > 1 {
+			for diskIndex := range vmInfo.DiskInfo {
+				if diskIndex >= len(disks) {
+					break
+				}
+				disks[diskIndex].ID = vmInfo.DiskInfo[diskIndex].DiskID
+				actualDisk := vmInfo.DiskInfo[diskIndex]
+				expectedDisk := disks[diskIndex]
+
+				// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
+				if actualDisk.DiskType != expectedDisk.Type || actualDisk.DiskGB != expectedDisk.SizeGBs {
+					changeDisks = append(changeDisks, expectedDisk)
+				}
+			}
+
+			if len(disks) > vmInfo.Disks {
+				for newDiskIndex := vmInfo.Disks; newDiskIndex < len(disks); newDiskIndex++ {
+					addDisks = append(addDisks, disks[newDiskIndex])
+				}
+			}
+			return resourceVirtualServerUpdate(ctx, d, m)
+		}
 	}
 
 	if d.HasChange("tags") {
