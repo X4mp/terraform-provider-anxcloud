@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/anexia-it/go-anxcloud/pkg/vsphere/info"
 	"log"
 	"time"
 
@@ -185,7 +184,6 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 
 	base64Encoding := true
 	provision, err := v.Provisioning().VM().Provision(ctx, def, base64Encoding)
-	var vmInfo info.Info
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -223,30 +221,24 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		}
 	}
 
-	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-	log.Println(d.Get("template_id"))
-	log.Println(d.Get("template_type"))
-	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 	if read := resourceVirtualServerRead(ctx, d, m); read.HasError() {
 		return read
 	}
 
-	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-	log.Println(d.Get("disks"))
-	log.Println(d.Get("template_id"))
-	log.Println(d.Get("template_type"))
-	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-	disks = expandVirtualServerDisks(d.Get("disks").([]interface{}))
-	if update := updateVirtualServerDisk(ctx, c, d.Id(), disks, vmInfo.DiskInfo); update != nil {
+	initialDisks := expandVirtualServerDisks(d.Get("disks").([]interface{}))
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++")
+	log.Println(disks)
+	log.Println(initialDisks)
+	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	if update := updateVirtualServerDisk(ctx, c, d.Id(), disks, initialDisks); update != nil {
 		return update
 	}
 
-	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	diags = resourceVirtualServerRead(ctx, d, m)
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++")
 	log.Println(d.Get("disks"))
-	log.Println(d.Get("template_id"))
-	log.Println(d.Get("template_type"))
-	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-	return resourceVirtualServerRead(ctx, d, m)
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++")
+	return diags
 }
 
 func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
@@ -279,15 +271,16 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 	}
 	log.Println(string(infoJson))
 
-	if err = d.Set("location_id", info.LocationID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err = d.Set("template_id", info.TemplateID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err = d.Set("template_type", info.TemplateType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	//if err = d.Set("location_id", info.LocationID); err != nil {
+	//	diags = append(diags, diag.FromErr(err)...)
+	//}
+	// FIXME The Engine does not return those values, therefore these settings would be overwritten with empty strings.
+	//if err = d.Set("template_id", info.TemplateID); err != nil {
+	//	diags = append(diags, diag.FromErr(err)...)
+	//}
+	//if err = d.Set("template_type", info.TemplateType); err != nil {
+	//	diags = append(diags, diag.FromErr(err)...)
+	//}
 	if err = d.Set("cpus", info.CPU); err != nil {
 		diags = append(diags, diag.FromErr(err)...)
 	}
@@ -328,6 +321,8 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 	if err = d.Set("disks", fDisks); err != nil {
 		diags = append(diags, diag.FromErr(err)...)
 	}
+
+	log.Println("Updated Disks from Info: ", fDisks)
 
 	if err = d.Set("disk", info.DiskInfo[0].DiskGB); err != nil {
 		diags = append(diags, diag.FromErr(err)...)
@@ -566,27 +561,32 @@ func getTagsDifferences(tagsA, tagsB []string) []string {
 	return out
 }
 
-func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, expected []vm.Disk, current []info.DiskInfo) diag.Diagnostics {
+func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, expected []vm.Disk, current []vm.Disk) diag.Diagnostics {
 	changeDisks := make([]vm.Disk, 0, len(current))
 	addDisks := make([]vm.Disk, 0, len(expected))
+	log.Println("current: ", current)
+	log.Println("expected: ", expected)
+	log.Println("+++++++++++++ Begin +++++++++++++++++++++++++++")
 	for diskIndex := range current {
 		log.Printf("Iterating %d\n", diskIndex)
-		log.Printf("disk: %d\n", current[diskIndex].DiskID)
+		log.Printf("disk: %d\n", current[diskIndex].ID)
 		if diskIndex >= len(expected) {
 			break
 		}
-		expected[diskIndex].ID = current[diskIndex].DiskID
+		expected[diskIndex].ID = current[diskIndex].ID
 		actualDisk := current[diskIndex]
 		expectedDisk := expected[diskIndex]
 
 		log.Printf("Changing disk, size: %d, type: %s\n", expectedDisk.SizeGBs, expectedDisk.Type)
 		// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
-		if actualDisk.DiskType != expectedDisk.Type || actualDisk.DiskGB != expectedDisk.SizeGBs {
+		if actualDisk.Type != expectedDisk.Type || actualDisk.SizeGBs != expectedDisk.SizeGBs {
 			changeDisks = append(changeDisks, expectedDisk)
 		}
 	}
+	log.Println("++++++++++++++++++++ End ++++++++++++++++++==")
 
 	if len(expected) > len(current) {
+		log.Println("Adding disks")
 		for newDiskIndex := len(current); newDiskIndex < len(expected); newDiskIndex++ {
 			addDisks = append(addDisks, expected[newDiskIndex])
 		}
@@ -596,6 +596,11 @@ func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, ex
 		AddDisks:    addDisks,
 		ChangeDisks: changeDisks,
 	}
+	request, jErr := json.Marshal(ch)
+	if jErr != nil {
+		panic(jErr)
+	}
+	log.Println(string(request))
 
 	v := vsphere.NewAPI(c)
 	if _, err := v.Provisioning().VM().Update(ctx, id, ch); err != nil {
