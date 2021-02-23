@@ -2,6 +2,7 @@ package anxcloud
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/anexia-it/go-anxcloud/pkg/vsphere/info"
 	"log"
@@ -226,11 +227,21 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		return read
 	}
 
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	log.Println(d.Get("disks"))
+	log.Println(d.Get("template_id"))
+	log.Println(d.Get("template_type"))
+	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 	disks = expandVirtualServerDisks(d.Get("disks").([]interface{}))
-	if update := updateVirtualServerDisk(ctx, c, d.Id(), disks, vmInfo.DiskInfo); update.HasError() {
+	if update := updateVirtualServerDisk(ctx, c, d.Id(), disks, vmInfo.DiskInfo); update != nil {
 		return update
 	}
 
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	log.Println(d.Get("disks"))
+	log.Println(d.Get("template_id"))
+	log.Println(d.Get("template_type"))
+	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 	return resourceVirtualServerRead(ctx, d, m)
 }
 
@@ -257,6 +268,12 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 
 	// TODO: we miss information about:
 	// * cpu_performance_type
+
+	infoJson, err := json.Marshal(info)
+	if err != nil {
+		panic(err)
+	}
+	log.Println(string(infoJson))
 
 	if err = d.Set("location_id", info.LocationID); err != nil {
 		diags = append(diags, diag.FromErr(err)...)
@@ -394,54 +411,51 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 		}
 	}
 
-	if d.HasChanges("disk_type", "disk") {
-		var disk vm.Disk
+	//if d.HasChanges("disk_type", "disk") {
+	//	var disk vm.Disk
+	//
+	//	info := expandVirtualServerInfo(d.Get("info").([]interface{}))
+	//if len(info.DiskInfo) != 1 {
+	//	return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
+	//}
+	//
+	//	disk.ID = info.DiskInfo[0].DiskID
+	//	disk.Type = d.Get("disk_type").(string)
+	//	disk.SizeGBs = d.Get("disk").(int)
+	//
+	//	ch.ChangeDisks = append(ch.ChangeDisks, disk)
+	//
+	//	requiresReboot = true
+	//}
 
-		info := expandVirtualServerInfo(d.Get("info").([]interface{}))
-		if len(info.DiskInfo) != 1 {
-			return diag.Errorf("unsupported number of disks, currently only 1 disk is allowed, got %d", len(info.DiskInfo))
+	if d.HasChange("disks") {
+		old, new := d.GetChange("disks")
+		oldDisks := expandVirtualServerDisks(old.([]interface{}))
+		newDisks := expandVirtualServerDisks(new.([]interface{}))
+
+		if len(newDisks) < len(oldDisks) {
+			return diag.Errorf("removing disks is not supported yet, expected at least %d, got %d", len(oldDisks), len(newDisks))
 		}
 
-		disk.ID = info.DiskInfo[0].DiskID
-		disk.Type = d.Get("disk_type").(string)
-		disk.SizeGBs = d.Get("disk").(int)
+		changeDisks := make([]vm.Disk, 0, len(oldDisks))
+		addDisks := make([]vm.Disk, 0, len(newDisks))
+		for i := range newDisks {
+			if i >= len(oldDisks) {
+				addDisks = append(addDisks, newDisks[i])
+				continue
+			}
 
-		ch.ChangeDisks = append(ch.ChangeDisks, disk)
+			actualDisk := oldDisks[i]
+			expectedDisk := newDisks[i]
 
-		requiresReboot = true
+			// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
+			if actualDisk.Type != expectedDisk.Type || actualDisk.SizeGBs != expectedDisk.SizeGBs {
+				changeDisks = append(changeDisks, expectedDisk)
+			}
+		}
+		ch.ChangeDisks = changeDisks
+		ch.AddDisks = addDisks
 	}
-
-	//if d.HasChange("disks") {
-	//var disks []vm.Disk
-
-	//old, new := d.GetChange("disks")
-	//oldDisks := expandVirtualServerDisks(old.([]interface{}))
-	//newDisks := expandVirtualServerDisks(new.([]interface{}))
-
-	//changeDisks := make([]vm.Disk, 0, len(oldDisks))
-	//addDisks := make([]vm.Disk, 0, len(newDisks))
-	//if len(newDisks) > 1 {
-	//	for i := range oldDisks {
-	//		if i >= len(disks) {
-	//			break
-	//		}
-	//		actualDisk := oldDisks[i]
-	//		expectedDisk := newDisks[i]
-	//
-	//		// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
-	//		if actualDisk.Type != expectedDisk.Type || actualDisk.Type != expectedDisk.Type {
-	//			changeDisks = append(changeDisks, expectedDisk)
-	//		}
-	//	}
-	//
-	//	if len(disks) > vmInfo.Disks {
-	//		for newDiskIndex := vmInfo.Disks; newDiskIndex < len(disks); newDiskIndex++ {
-	//			addDisks = append(addDisks, disks[newDiskIndex])
-	//		}
-	//	}
-	//	return resourceVirtualServerUpdate(ctx, d, m)
-	//}
-	//}
 
 	if d.HasChange("tags") {
 		old, new := d.GetChange("tags")
@@ -553,6 +567,8 @@ func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, ex
 	changeDisks := make([]vm.Disk, 0, len(current))
 	addDisks := make([]vm.Disk, 0, len(expected))
 	for diskIndex := range current {
+		log.Printf("Iterating %d\n", diskIndex)
+		log.Printf("disk: %d\n", current[diskIndex].DiskID)
 		if diskIndex >= len(expected) {
 			break
 		}
@@ -560,6 +576,7 @@ func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, ex
 		actualDisk := current[diskIndex]
 		expectedDisk := expected[diskIndex]
 
+		log.Printf("Changing disk, size: %d, type: %s\n", expectedDisk.SizeGBs, expectedDisk.Type)
 		// TODO test what happens if we set "more" fields than necessary (e.g. type does not change")
 		if actualDisk.DiskType != expectedDisk.Type || actualDisk.DiskGB != expectedDisk.SizeGBs {
 			changeDisks = append(changeDisks, expectedDisk)
@@ -578,8 +595,32 @@ func updateVirtualServerDisk(ctx context.Context, c client.Client, id string, ex
 	}
 
 	v := vsphere.NewAPI(c)
-
 	if _, err := v.Provisioning().VM().Update(ctx, id, ch); err != nil {
+		return diag.FromErr(err)
+	}
+
+	delay := 10 * time.Second
+
+	vmState := resource.StateChangeConf{
+		Delay:      delay,
+		Timeout:    10 * time.Minute,
+		MinTimeout: 10 * time.Second,
+		Pending: []string{
+			vmPoweredOff,
+		},
+		Target: []string{
+			vmPoweredOn,
+		},
+		Refresh: func() (interface{}, string, error) {
+			info, err := v.Info().Get(ctx, id)
+			if err != nil {
+				return "", "", err
+			}
+			return info, info.Status, nil
+		},
+	}
+	_, err := vmState.WaitForStateContext(ctx)
+	if err != nil {
 		return diag.FromErr(err)
 	}
 
