@@ -223,6 +223,10 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 		}
 	}
 
+	log.Println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	log.Println(d.Get("template_id"))
+	log.Println(d.Get("template_type"))
+	log.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 	if read := resourceVirtualServerRead(ctx, d, m); read.HasError() {
 		return read
 	}
@@ -325,7 +329,6 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 		diags = append(diags, diag.FromErr(err)...)
 	}
 
-	// TODO implement flatten func to set the disks back to the state
 	if err = d.Set("disk", info.DiskInfo[0].DiskGB); err != nil {
 		diags = append(diags, diag.FromErr(err)...)
 	}
