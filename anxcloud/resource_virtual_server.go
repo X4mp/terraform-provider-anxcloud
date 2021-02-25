@@ -182,7 +182,7 @@ func resourceVirtualServerCreate(ctx context.Context, d *schema.ResourceData, m 
 			if err != nil {
 				return resource.NonRetryableError(fmt.Errorf("unable to get vm progress by ID '%s', %w", provision.Identifier, err))
 			}
-			if p.VMIdentifier != "" {
+			if p.VMIdentifier != "" && p.Progress < 100 {
 				d.SetId(p.VMIdentifier)
 			} else {
 				return resource.RetryableError(fmt.Errorf("vm with provisioning ID '%s' is not ready yet: %d %%", provision.Identifier, p.Progress))
