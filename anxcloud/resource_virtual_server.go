@@ -395,6 +395,9 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 			return diag.Errorf("removing disks is not supported yet, expected at least %d, got %d", len(oldDisks), len(newDisks))
 		}
 
+		//oldDisksMap := make(map[string]vm.Disk, len(oldDisks))
+		//newDisksMap := make(map[string]vm.Disk, len(newDisks))
+
 		changeDisks := make([]vm.Disk, 0, len(oldDisks))
 		addDisks := make([]vm.Disk, 0, len(newDisks))
 		for i := range newDisks {
@@ -438,14 +441,24 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 			}
 		}
 	}
+	ch.Reboot = requiresReboot
 
-	if _, err := v.Provisioning().VM().Update(ctx, d.Id(), ch); err != nil {
+	var response vm.ProvisioningResponse
+	provisioning := v.Provisioning()
+
+	var err error
+	if response, err = provisioning.VM().Update(ctx, d.Id(), ch); err != nil {
+		return diag.FromErr(err)
+	}
+
+	if _, err = provisioning.Progress().AwaitCompletion(ctx, response.Identifier); err != nil {
 		return diag.FromErr(err)
 	}
 
 	delay := 10 * time.Second
 	if requiresReboot {
 		delay = 3 * time.Minute
+
 	}
 
 	vmState := resource.StateChangeConf{
@@ -466,8 +479,7 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 			return info, info.Status, nil
 		},
 	}
-	_, err := vmState.WaitForStateContext(ctx)
-	if err != nil {
+	if _, err = vmState.WaitForStateContext(ctx); err != nil {
 		return diag.FromErr(err)
 	}
 
