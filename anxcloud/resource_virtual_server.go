@@ -280,8 +280,7 @@ func resourceVirtualServerRead(ctx context.Context, d *schema.ResourceData, m in
 		//if i < len(specDisks) {
 		//	specDisks[i].ID = diskInfo.DiskID
 		//	disks = append(disks, specDisks[i])
-		//	continue
-		//}
+		//	continue //}
 		disk := vm.Disk{
 			ID:      diskInfo.DiskID,
 			Type:    diskInfo.DiskType,
@@ -418,7 +417,6 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 		log.Println("AddDisks: ", addDisks)
 		ch.ChangeDisks = changeDisks
 		ch.AddDisks = addDisks
-		requiresReboot = true
 	}
 
 	if d.HasChange("tags") {
@@ -441,7 +439,6 @@ func resourceVirtualServerUpdate(ctx context.Context, d *schema.ResourceData, m 
 			}
 		}
 	}
-	ch.Reboot = requiresReboot
 
 	var response vm.ProvisioningResponse
 	provisioning := v.Provisioning()
