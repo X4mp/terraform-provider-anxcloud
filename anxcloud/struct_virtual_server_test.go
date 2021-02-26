@@ -103,14 +103,14 @@ func TestExpanderVirtualServerDNS(t *testing.T) {
 
 func TestExpanderVirtualServerDisks(t *testing.T) {
 	cases := []struct {
-		Input []interface{}
+		Input          []interface{}
 		ExpectedOutput []vm.Disk
 	}{
 		{
 			[]interface{}{
 				map[string]interface{}{
-					"disk": 10,
-					"disk_id": 2000,
+					"disk":      10,
+					"disk_id":   2000,
 					"disk_type": "STD1",
 				},
 			},
@@ -363,7 +363,7 @@ func TestFlattenVirtualServerInfo(t *testing.T) {
 
 func TestFlattenVirtualServerDisks(t *testing.T) {
 	cases := []struct {
-		Input []vm.Disk
+		Input          []vm.Disk
 		ExpectedOutput []interface{}
 	}{
 		{
