@@ -68,6 +68,8 @@ resource "anxcloud_virtual_server" "example" {
 
 ### Network
 
+It is not supported to change networks once the virtual server exists. Any addition of a new or change to an existing one will require to remake it.
+
 - `vlan_id` - (Required) VLAN identifier.
 - `nic_type` - (Required) Network interface card type.
 - `ips` - (Optional) Requested list of IPs and IPs identifiers. IPs are ignored when using template_type 'from_scratch'. Defaults to free IPs from IP pool attached to VLAN.
