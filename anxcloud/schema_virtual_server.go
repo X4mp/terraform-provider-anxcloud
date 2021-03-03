@@ -66,6 +66,7 @@ func schemaVirtualServer() map[string]*schema.Schema {
 			Type:        schema.TypeList,
 			Optional:    true,
 			Description: "Network interface",
+			ForceNew: true,
 			Elem: &schema.Resource{
 				Schema: map[string]*schema.Schema{
 					"vlan_id": {
